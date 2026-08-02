@@ -1,0 +1,12 @@
+from enum import Enum
+
+
+class AccountType(str, Enum):
+    PERSONAL = "PERSONAL"
+    EMPLOYER = "EMPLOYER"
+    MERCHANT = "MERCHANT"
+    LANDLORD = "LANDLORD"
+    INVESTMENT = "INVESTMENT"
+    SUBSCRIPTION = "SUBSCRIPTION"
+    GOVERNMENT = "GOVERNMENT"
+    SYSTEM = "SYSTEM"

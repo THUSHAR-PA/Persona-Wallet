@@ -1,0 +1,17 @@
+
+__pycache__/
+*.pyc
+
+.venv/
+venv/
+
+.env
+
+.idea/
+.vscode/
+
+alembic/versions/__pycache__/
+
+node_modules/
+
+dist/
