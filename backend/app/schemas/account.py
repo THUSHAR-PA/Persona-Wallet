@@ -21,3 +21,10 @@ class AccountRead(BaseModel):
     balance: Decimal
     currency: str
     is_system: bool
+
+
+class AccountDestinationRead(BaseModel):
+    id: int
+    name: str
+    account_type: AccountType
+    owner_username: str

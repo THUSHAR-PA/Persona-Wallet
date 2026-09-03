@@ -3,6 +3,7 @@ import api from "../api";
 
 function Transfer() {
   const [accounts, setAccounts] = useState([]);
+  const [destinationAccounts, setDestinationAccounts] = useState([]);
 
   const [fromAccount, setFromAccount] = useState("");
   const [toAccount, setToAccount] = useState("");
@@ -23,8 +24,22 @@ function Transfer() {
     }
   };
 
+  const fetchDestinationAccounts = async () => {
+    try {
+      const response = await api.get("/accounts/destinations");
+      setDestinationAccounts(response.data);
+    } catch (error) {
+      console.error(
+        "Failed to load destination accounts:",
+        error
+      );
+      setError("Failed to load destination accounts.");
+    }
+  };
+
   useEffect(() => {
     fetchAccounts();
+    fetchDestinationAccounts();
   }, []);
 
   const handleTransfer = async (e) => {
@@ -66,6 +81,7 @@ function Transfer() {
       setDescription("");
 
       await fetchAccounts();
+      await fetchDestinationAccounts();
 
     } catch (error) {
       console.error("Transaction failed:", error);
@@ -85,7 +101,7 @@ function Transfer() {
       </h1>
 
       <p className="text-gray-500 mb-8">
-        Send money between your accounts and financial entities.
+        Send money between your accounts and other users.
       </p>
 
       <form
@@ -135,12 +151,13 @@ function Transfer() {
               Select destination
             </option>
 
-            {accounts.map((account) => (
+            {destinationAccounts.map((account) => (
               <option
                 key={account.id}
                 value={account.id}
               >
-                {account.name} — {account.account_type}
+                {account.owner_username} — {account.name} —{" "}
+                {account.account_type}
               </option>
             ))}
           </select>
