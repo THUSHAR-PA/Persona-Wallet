@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from app.core.dependencies import get_current_user
 
 from app.core.database import get_db
 from app.core.security import (
@@ -94,4 +95,14 @@ def login(
     return {
         "access_token": token,
         "token_type": "bearer"
+    }
+
+@router.get("/me")
+def get_me(
+    current_user: User = Depends(get_current_user),
+):
+    return {
+        "id": current_user.id,
+        "username": current_user.username,
+        "email": current_user.email,
     }

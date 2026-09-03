@@ -1,3 +1,4 @@
+
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict
@@ -14,9 +15,13 @@ class TransactionCreate(BaseModel):
     description: str | None = None
 
 
-class TransactionRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+class TransactionAccountInfo(BaseModel):
+    id: int
+    name: str
+    owner_username: str
 
+
+class TransactionRead(BaseModel):
     id: int
     from_account_id: int
     to_account_id: int
@@ -24,3 +29,6 @@ class TransactionRead(BaseModel):
     category: TransactionCategory
     description: str | None
     status: TransactionStatus
+
+    from_account: TransactionAccountInfo
+    to_account: TransactionAccountInfo
