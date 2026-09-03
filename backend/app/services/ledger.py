@@ -1,3 +1,4 @@
+
 from decimal import Decimal
 
 from fastapi import HTTPException
@@ -5,11 +6,13 @@ from sqlalchemy.orm import Session
 
 from app.models.account import Account
 from app.models.transaction import Transaction
+from app.models.user import User
 from app.enums.transaction_status import TransactionStatus
 
 
 def create_transaction(
     db: Session,
+    current_user: User,
     from_account_id: int,
     to_account_id: int,
     amount: Decimal,
@@ -42,15 +45,28 @@ def create_transaction(
             detail="Destination account not found."
         )
 
-    if from_account_id != to_account_id:
-        if from_account.balance < amount:
-            raise HTTPException(
-                status_code=400,
-                detail="Insufficient balance."
-            )
+    # The logged-in user must own the source account
+    if from_account.owner_id != current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="You can only transfer money from your own account."
+        )
 
-        from_account.balance -= amount
-        to_account.balance += amount
+    # Prevent transferring to the exact same account
+    if from_account_id == to_account_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Source and destination accounts must be different."
+        )
+
+    if from_account.balance < amount:
+        raise HTTPException(
+            status_code=400,
+            detail="Insufficient balance."
+        )
+
+    from_account.balance -= amount
+    to_account.balance += amount
 
     transaction = Transaction(
         from_account_id=from_account_id,
