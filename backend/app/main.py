@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.database import engine
 from app.routers.accounts import router as accounts_router
 from app.routers.transactions import router as transactions_router
-
+from app.routers.auth import router as auth_router
 
 app = FastAPI(
     title="Persona Wallet",
@@ -23,6 +23,7 @@ app.add_middleware(
 
 app.include_router(accounts_router)
 app.include_router(transactions_router)
+app.include_router(auth_router)
 
 @app.get("/")
 def home():

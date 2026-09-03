@@ -1,7 +1,7 @@
 import { Routes, Route } from "react-router-dom";
 
 import Layout from "./components/Layout/Layout";
-
+import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Accounts from "./pages/Accounts";
 import Transfer from "./pages/Transfer";
@@ -12,6 +12,7 @@ function App() {
   return (
     <Layout>
       <Routes>
+        <Route path="/login" element={<Login />} />
         <Route path="/" element={<Dashboard />} />
         <Route path="/accounts" element={<Accounts />} />
         <Route path="/transfer" element={<Transfer />} />
