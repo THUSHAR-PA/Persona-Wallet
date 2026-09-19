@@ -24,14 +24,16 @@ router = APIRouter(
 def create_transaction_api(
     transaction_data: TransactionCreate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     transaction = create_transaction(
-        db=db,
-        from_account_id=transaction_data.from_account_id,
-        to_account_id=transaction_data.to_account_id,
-        amount=transaction_data.amount,
-        category=transaction_data.category,
-        description=transaction_data.description,
+    db=db,
+    current_user=current_user,
+    from_account_id=transaction_data.from_account_id,
+    to_account_id=transaction_data.to_account_id,
+    amount=transaction_data.amount,
+    category=transaction_data.category,
+    description=transaction_data.description,
     )
 
     from_user = db.query(User).filter(
