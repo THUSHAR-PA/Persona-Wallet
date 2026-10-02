@@ -16,12 +16,18 @@ router = APIRouter(
 
 
 def _serialize_transaction(transaction: Transaction, current_user: User):
-    is_outgoing = transaction.from_account.owner_id == current_user.id
-    counterparty = (
-        transaction.to_account.owner.username
-        if is_outgoing
-        else transaction.from_account.owner.username
-    )
+    from_current_user = transaction.from_account.owner_id == current_user.id
+    to_current_user = transaction.to_account.owner_id == current_user.id
+
+    if from_current_user and to_current_user:
+        direction = "INTERNAL"
+        counterparty = transaction.to_account.name
+    elif from_current_user:
+        direction = "OUTFLOW"
+        counterparty = transaction.to_account.owner.username
+    else:
+        direction = "INFLOW"
+        counterparty = transaction.from_account.owner.username
 
     return {
         "id": transaction.id,
@@ -32,7 +38,7 @@ def _serialize_transaction(transaction: Transaction, current_user: User):
         "description": transaction.description,
         "status": transaction.status,
         "created_at": transaction.created_at,
-        "direction": "OUTFLOW" if is_outgoing else "INFLOW",
+        "direction": direction,
         "counterparty": counterparty,
     }
 
@@ -75,10 +81,13 @@ def get_financial_summary(
     for transaction in transactions:
         amount = transaction.amount or Decimal("0")
 
-        if transaction.to_account.owner_id == current_user.id:
+        from_current_user = transaction.from_account.owner_id == current_user.id
+        to_current_user = transaction.to_account.owner_id == current_user.id
+
+        if to_current_user and not from_current_user:
             total_inflow += amount
 
-        if transaction.from_account.owner_id == current_user.id:
+        if from_current_user and not to_current_user:
             total_outflow += amount
             category_name = transaction.category.value
             category_spend[category_name] = (
