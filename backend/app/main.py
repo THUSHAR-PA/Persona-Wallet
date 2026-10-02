@@ -6,6 +6,7 @@ from app.routers.accounts import router as accounts_router
 from app.routers.transactions import router as transactions_router
 from app.routers.auth import router as auth_router
 from app.routers.integration import router as integration_router
+from app.routers.financial import router as financial_router
 app = FastAPI(
     title="Persona Wallet",
     version="1.0.0"
@@ -22,6 +23,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(integration_router)
+app.include_router(financial_router)
 app.include_router(accounts_router)
 app.include_router(transactions_router)
 app.include_router(auth_router)

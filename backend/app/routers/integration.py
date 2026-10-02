@@ -1,6 +1,7 @@
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends
+from datetime import date
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -8,6 +9,8 @@ from app.core.dependencies import get_current_user
 from app.models.user import User
 from app.models.account import Account
 from app.models.transaction import Transaction
+from app.enums.transaction_status import TransactionStatus
+from app.services.financial_analysis import financial_analysis
 
 router = APIRouter(
     prefix="/integration",
@@ -24,10 +27,18 @@ def _serialize_transaction(transaction: Transaction, current_user: User):
         counterparty = transaction.to_account.name
     elif from_current_user:
         direction = "OUTFLOW"
-        counterparty = transaction.to_account.owner.username
+        counterparty = (
+            transaction.to_account.owner.username
+            if transaction.to_account.owner
+            else transaction.to_account.name
+        )
     else:
         direction = "INFLOW"
-        counterparty = transaction.from_account.owner.username
+        counterparty = (
+            transaction.from_account.owner.username
+            if transaction.from_account.owner
+            else transaction.from_account.name
+        )
 
     return {
         "id": transaction.id,
@@ -45,14 +56,14 @@ def _serialize_transaction(transaction: Transaction, current_user: User):
 
 @router.get("/financial-summary")
 def get_financial_summary(
+    months: int = Query(6, ge=1, le=24),
+    end_date: date | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    accounts = (
-        db.query(Account)
-        .filter(Account.owner_id == current_user.id)
-        .all()
-    )
+    if end_date and end_date > date.today():
+        raise HTTPException(422, "Analysis end date cannot be in the future.")
+    accounts = db.query(Account).filter(Account.owner_id == current_user.id).all()
 
     account_ids = [account.id for account in accounts]
 
@@ -71,7 +82,7 @@ def get_financial_summary(
     total_balance = sum(
         (account.balance or Decimal("0"))
         for account in accounts
-        if not account.is_system
+        if not account.is_system and account.currency == "INR"
     )
 
     total_inflow = Decimal("0")
@@ -79,15 +90,25 @@ def get_financial_summary(
     category_spend: dict[str, Decimal] = {}
 
     for transaction in transactions:
+        if transaction.status != TransactionStatus.SUCCESS:
+            continue
         amount = transaction.amount or Decimal("0")
 
         from_current_user = transaction.from_account.owner_id == current_user.id
         to_current_user = transaction.to_account.owner_id == current_user.id
 
-        if to_current_user and not from_current_user:
+        if (
+            to_current_user
+            and not from_current_user
+            and transaction.to_account.currency == "INR"
+        ):
             total_inflow += amount
 
-        if from_current_user and not to_current_user:
+        if (
+            from_current_user
+            and not to_current_user
+            and transaction.from_account.currency == "INR"
+        ):
             total_outflow += amount
             category_name = transaction.category.value
             category_spend[category_name] = (
@@ -109,6 +130,9 @@ def get_financial_summary(
         )[0]
 
     return {
+        "financial_twin": financial_analysis(
+            db, current_user, accounts, transactions, months, end_date
+        ),
         "user": {
             "id": current_user.id,
             "username": current_user.username,
@@ -125,6 +149,7 @@ def get_financial_summary(
             if not account.is_system
         ],
         "metrics": {
+            "currency": "INR",
             "total_balance": total_balance,
             "total_inflow": total_inflow,
             "total_outflow": total_outflow,
