@@ -7,6 +7,7 @@ import Accounts from "./pages/Accounts";
 import Transfer from "./pages/Transfer";
 
 import FinancialProfile from "./pages/FinancialProfile";
+import Statements from "./pages/Statements";
 
 function App() {
   return (
@@ -18,7 +19,7 @@ function App() {
         <Route path="/transfer" element={<Transfer />} />
         <Route path="/history" element={<History />} />
         <Route path="/profile" element={<FinancialProfile />} />
-        
+        <Route path="/statements" element={<Statements />} />
       </Routes>
     </Layout>
   );

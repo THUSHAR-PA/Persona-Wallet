@@ -25,13 +25,14 @@ def create_transaction(
             detail="Transaction amount must be greater than zero."
         )
 
-    from_account = db.query(Account).filter(
-        Account.id == from_account_id
-    ).first()
-
-    to_account = db.query(Account).filter(
-        Account.id == to_account_id
-    ).first()
+    # Lock both accounts in the same order as statement imports. A transfer and
+    # import cannot race to overwrite each other's balance on PostgreSQL.
+    locked = db.query(Account).filter(Account.id.in_([from_account_id, to_account_id])).order_by(
+        Account.id
+    ).with_for_update().populate_existing().all()
+    by_id = {account.id: account for account in locked}
+    from_account = by_id.get(from_account_id)
+    to_account = by_id.get(to_account_id)
 
     if not from_account:
         raise HTTPException(
@@ -59,11 +60,17 @@ def create_transaction(
             detail="Source and destination accounts must be different."
         )
 
+    if from_account.currency != to_account.currency:
+        raise HTTPException(400, "Transfers require accounts in the same currency.")
+
     if from_account.balance < amount:
         raise HTTPException(
             status_code=400,
             detail="Insufficient balance."
         )
+
+    if to_account.balance + amount >= Decimal("10000000000000"):
+        raise HTTPException(400, "Destination balance exceeds the supported amount.")
 
     from_account.balance -= amount
     to_account.balance += amount

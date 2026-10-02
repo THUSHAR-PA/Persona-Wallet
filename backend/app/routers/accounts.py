@@ -10,6 +10,7 @@ from app.schemas.account import (
 )
 from app.core.dependencies import get_current_user
 from app.models.user import User
+from app.services.bank_ledger import account_ledger
 
 
 router = APIRouter(
@@ -48,6 +49,20 @@ def create_account(
     db.refresh(account)
 
     return account
+
+
+@router.get("/{account_id}/statement")
+def get_account_statement(
+    account_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    account = db.query(Account).filter_by(
+        id=account_id, owner_id=current_user.id, is_system=False
+    ).first()
+    if not account:
+        raise HTTPException(404, "Account not found.")
+    return account_ledger(db, account)
 
 
 @router.get("/", response_model=list[AccountRead])

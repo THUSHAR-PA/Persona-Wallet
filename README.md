@@ -4,6 +4,15 @@ PersonaWallet is a full-stack digital wallet application built with FastAPI, Pos
 
 The project manages users, accounts, balances, and transactions. It also provides an integration API for connecting PersonaWallet with the PersonaTwin project.
 
+The financial twin now includes salary and assets, loans and mortgages, reviewed
+CSV/PDF bank statement imports, monthly cash flow, expense and debt service ratios,
+and a six-month fictional sample. See [Financial twin setup and API](docs/financial-twin.md)
+for import formats, calculations, demo data, tests and deployment requirements.
+
+**Backend update:** configure a private `SECRET_KEY` of at least 32 characters and
+run `alembic upgrade head` before starting the updated backend. The old hard-coded
+JWT key is no longer used.
+
 ---
 
 ## 🚀 Features
