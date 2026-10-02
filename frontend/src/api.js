@@ -1,6 +1,7 @@
 import axios from "axios";
 
 const api = axios.create({
+  timeout: 90000,
   baseURL:
     import.meta.env.VITE_API_URL || "https://persona-wallet.onrender.com",
 });

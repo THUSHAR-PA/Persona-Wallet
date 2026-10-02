@@ -13,12 +13,15 @@ import {
 
 export default function Statements() {
   const [accounts, setAccounts] = useState([]);
+  const [walletAccounts, setWalletAccounts] = useState([]);
+  const [statement, setStatement] = useState(null);
   const [accountId, setAccountId] = useState("");
   const [account, setAccount] = useState({
     name: "",
     bank_name: "",
     last_four: "",
     currency: "INR",
+    wallet_account_id: "",
   });
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
@@ -29,7 +32,9 @@ export default function Statements() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const refresh = async () => {
-    const { data } = await api.get("/financial/bank-accounts");
+    const [banks, wallets] = await Promise.all([api.get("/financial/bank-accounts"), api.get("/accounts/")]);
+    const data = banks.data;
+    setWalletAccounts(wallets.data);
     setAccounts(data);
     setAccountId((current) =>
       data.some((item) => String(item.id) === current)
@@ -83,6 +88,17 @@ export default function Statements() {
       );
     });
   }
+  async function downloadStatement(item) {
+    await action(async () => {
+      const { data } = await api.get(`/financial/bank-accounts/${item.id}/statement?format=csv`, { responseType: "blob" });
+      const url = URL.createObjectURL(data);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `account-${item.wallet_account_id}-statement.csv`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    });
+  }
   if (loading)
     return <p className="text-slate-500">Loading statement accounts...</p>;
   return (
@@ -94,8 +110,7 @@ export default function Statements() {
           </p>
           <h1 className="mt-2 text-3xl font-bold">Bank statements</h1>
           <p className="mt-2 text-sm text-slate-500">
-            Upload, review categories, then import. Wallet balances stay
-            separate.
+            Import history into your bank account. Its balance updates, and later transfers appear in your statement.
           </p>
         </div>
         <button
@@ -115,7 +130,7 @@ export default function Statements() {
             action(async () => {
               const { data } = await api.post(
                 "/financial/bank-accounts",
-                account,
+                { ...account, wallet_account_id: account.wallet_account_id ? Number(account.wallet_account_id) : null },
               );
               await refresh();
               setAccountId(String(data.id));
@@ -124,6 +139,7 @@ export default function Statements() {
                 bank_name: "",
                 last_four: "",
                 currency: "INR",
+                wallet_account_id: "",
               });
               resetPreview();
               setMessage("Bank account added. Choose its statement to import.");
@@ -136,6 +152,15 @@ export default function Statements() {
             needed.
           </p>
           <div className="mt-5 space-y-4">
+            <Field title="Account to populate">
+              <select className={inputClass} value={account.wallet_account_id}
+                onChange={(event) => setAccount({ ...account, wallet_account_id: event.target.value })}>
+                <option value="">Create a new bank account</option>
+                {walletAccounts.filter((item) => item.currency === "INR" && !accounts.some((bank) => bank.wallet_account_id === item.id)).map((item) => (
+                  <option key={item.id} value={item.id}>{item.name} · {money(item.balance)}</option>
+                ))}
+              </select>
+            </Field>
             <Field title="Account label">
               <input
                 className={inputClass}
@@ -242,7 +267,7 @@ export default function Statements() {
           <div className="mt-5 rounded-xl bg-slate-50 p-4 text-xs leading-6 text-slate-600">
             <p className="font-semibold">Supported statement columns</p>
             <p>
-              Date, Description, Debit, Credit. Optional: Balance, Reference,
+              Date, Description, Debit, Credit, Balance. Optional: Reference,
               Category. Dates: YYYY-MM-DD or DD/MM/YYYY. Use INR statements.
             </p>
             <p className="mt-2">
@@ -272,6 +297,7 @@ export default function Statements() {
               <p>
                 Closing <strong>{money(preview.closing_balance)}</strong>
               </p>
+              <p className="mt-2">Account after import <strong>{money(preview.projected_account_balance)}</strong></p>
             </div>
           </div>
           <ul className="mt-4 list-disc space-y-1 pl-5 text-xs leading-5 text-slate-500">
@@ -409,12 +435,10 @@ export default function Statements() {
                   </div>
                   <div>
                     <p className="text-lg font-bold">
-                      {money(item.closing_balance)}
+                      {money(item.balance)}
                     </p>
                     <p className="text-xs text-slate-500">
-                      {item.balance_as_of
-                        ? `Statement balance as of ${item.balance_as_of}`
-                        : "No balance snapshot yet"}
+                      Available account balance · account #{item.wallet_account_id}
                     </p>
                   </div>
                 </div>
@@ -433,13 +457,20 @@ export default function Statements() {
                     </p>
                   </div>
                 ))}
-                <button
+                <div className="mt-4 flex flex-wrap gap-3">
+                  <button className={secondaryClass} disabled={busy} onClick={() => action(async () => {
+                    const { data } = await api.get(`/financial/bank-accounts/${item.id}/statement`);
+                    setStatement(data);
+                  })}>View current statement</button>
+                  <button className={secondaryClass} disabled={busy} onClick={() => downloadStatement(item)}>Download current CSV</button>
+                </div>
+                {!item.imports.length && <button
                   className="mt-3 text-xs text-red-600"
                   disabled={busy}
                   onClick={() => {
                     if (
                       window.confirm(
-                        `Delete ${item.name} and all its imported statement history?`,
+                        `Remove the empty statement setup for ${item.name}? Your bank account stays available.`,
                       )
                     )
                       action(async () => {
@@ -452,8 +483,8 @@ export default function Statements() {
                       });
                   }}
                 >
-                  Remove account & imported data
-                </button>
+                  Remove empty setup
+                </button>}
               </article>
             ))
           ) : (
@@ -463,6 +494,18 @@ export default function Statements() {
           )}
         </div>
       </section>
+      {statement && <section className={`${panelClass} mt-6`}>
+        <div className="flex justify-between gap-3"><h2 className="text-xl font-semibold">{statement.account_name} · current statement</h2>
+          <button className={secondaryClass} onClick={() => setStatement(null)}>Close</button></div>
+        <p className="mt-2 text-sm text-slate-500">Opening {money(statement.opening_balance)} · Current balance {money(statement.closing_balance)} · {statement.transactions.length} transactions</p>
+        <div className="mt-4 max-h-[32rem] overflow-auto"><table className="w-full text-left text-sm">
+          <thead><tr>{["Date", "Description", "Debit / credit", "Balance", "Source"].map((value) => <th key={value} className="p-2">{value}</th>)}</tr></thead>
+          <tbody>{statement.transactions.map((row) => <tr className="border-t" key={`${row.source}-${row.id}`}>
+            <td className="whitespace-nowrap p-2">{row.date}</td><td className="p-2">{row.description}</td>
+            <td className="whitespace-nowrap p-2">{row.direction === "INFLOW" ? "+" : "−"}{money(row.amount)}</td>
+            <td className="whitespace-nowrap p-2">{money(row.balance)}</td><td className="p-2 text-xs">{label(row.source)}</td>
+          </tr>)}</tbody></table></div>
+      </section>}
     </div>
   );
 }

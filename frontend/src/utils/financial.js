@@ -14,6 +14,8 @@ export const label = (value) =>
     .toLowerCase()
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 export function apiError(error) {
+  if (error.code === "ECONNABORTED")
+    return "The bank service took too long to respond. Please try again shortly.";
   const detail = error.response?.data?.detail;
   if (Array.isArray(detail))
     return detail

@@ -4,11 +4,12 @@ from calendar import monthrange
 from datetime import date
 from decimal import Decimal
 
+from app.services.bank_ledger import account_ledger
+
 from app.models.financial import (
     BankAccount,
     FinancialProfile,
     Liability,
-    StatementEntry,
     StatementImport,
 )
 
@@ -41,14 +42,6 @@ def financial_analysis(
         db.query(BankAccount).filter_by(user_id=user.id).order_by(BankAccount.id).all()
     )
     account_ids = [account.id for account in bank_accounts]
-    entries = (
-        db.query(StatementEntry)
-        .filter(StatementEntry.account_id.in_(account_ids))
-        .order_by(StatementEntry.transaction_date, StatementEntry.id)
-        .all()
-        if account_ids
-        else []
-    )
     imports = (
         db.query(StatementImport)
         .filter(StatementImport.account_id.in_(account_ids))
@@ -57,46 +50,16 @@ def financial_analysis(
         if account_ids
         else []
     )
-    # Prefer bank observations, rather than counting simulated wallet transfers again.
-    source = "BANK_STATEMENTS" if entries else "WALLET_LEDGER"
+    # Imports and transfers are two sources of the same account ledger.
+    source = "UNIFIED_BANK_LEDGER"
     observations = []
-    if entries:
-        for entry in entries:
-            observations.append(
-                {
-                    "id": entry.id,
-                    "date": entry.transaction_date,
-                    "description": entry.description,
-                    "amount": entry.amount,
-                    "direction": entry.direction,
-                    "category": entry.category,
-                    "account_id": entry.account_id,
-                    "reference": entry.reference,
-                }
-            )
-    else:
-        for txn in wallet_transactions:
-            if txn.status.value != "SUCCESS":
-                continue
-            from_user = txn.from_account.owner_id == user.id
-            to_user = txn.to_account.owner_id == user.id
-            if from_user == to_user:
-                continue
-            owned_account = txn.from_account if from_user else txn.to_account
-            if owned_account.currency != "INR":
-                continue
-            observations.append(
-                {
-                    "id": txn.id,
-                    "date": txn.created_at.date(),
-                    "description": txn.description or txn.category.value,
-                    "amount": txn.amount,
-                    "direction": "OUTFLOW" if from_user else "INFLOW",
-                    "category": txn.category.value,
-                    "account_id": owned_account.id,
-                    "reference": "",
-                }
-            )
+    account_ledgers = {}
+    for account in wallet_accounts:
+        if account.currency != "INR" or account.is_system:
+            continue
+        ledger = account_ledger(db, account)
+        account_ledgers[account.id] = ledger
+        observations.extend(ledger["transactions"])
     end = requested_end or max(
         (row["date"] for row in observations), default=date.today()
     )
@@ -160,35 +123,13 @@ def financial_analysis(
     debt = sum((loan.outstanding_amount for loan in liabilities), ZERO)
     banks = []
     for account in bank_accounts:
-        latest = next(
-            (
-                batch
-                for batch in imports
-                if batch.account_id == account.id
-                and batch.period_end <= end
-                and batch.closing_balance is not None
-            ),
-            None,
-        )
-        banks.append(
-            {
-                **serialize(account),
-                "balance": latest.closing_balance if latest else None,
-                "balance_as_of": latest.period_end if latest else None,
-            }
-        )
-    cash = (
-        sum((bank["balance"] for bank in banks if bank["balance"] is not None), ZERO)
-        if entries
-        else sum(
-            (
-                account.balance
-                for account in wallet_accounts
-                if account.currency == "INR" and not account.is_system
-            ),
-            ZERO,
-        )
-    )
+        ledger = account_ledgers.get(account.wallet_account_id)
+        banks.append({**serialize(account),
+            "balance": ledger["closing_balance"] if ledger else None,
+            "balance_as_of": date.today() if ledger else None,
+        })
+    cash = sum((account.balance for account in wallet_accounts
+                if account.currency == "INR" and not account.is_system), ZERO)
     other_assets = (
         (profile.investment_value + profile.property_value + profile.other_asset_value)
         if profile
@@ -212,25 +153,7 @@ def financial_analysis(
         flags.append(
             "The final month is partial; monthly ratios may change with additional transactions."
         )
-    if entries:
-        flags.append(
-            "Bank statement analytics exclude wallet transfers to avoid adding the same money twice."
-        )
-    else:
-        flags.append(
-            "Only the wallet ledger is available. Upload statements to observe external banking activity."
-        )
-    if banks and any(bank["balance"] is None for bank in banks):
-        flags.append(
-            "Some bank accounts have no reconciled closing balance; cash and net worth are incomplete."
-        )
-    if any(
-        bank["balance_as_of"] and (end - bank["balance_as_of"]).days > 31
-        for bank in banks
-    ):
-        flags.append(
-            "Some bank balance snapshots are more than 31 days older than the analysis end date."
-        )
+    flags.append("Imported bank history and subsequent Persona Wallet transfers share one account ledger. Cash is the current spendable INR balance, regardless of the analysis window.")
     if liabilities:
         flags.append(
             "Debt balances and EMI schedules are self-reported; statement EMIs do not automatically reduce principal."
@@ -239,7 +162,7 @@ def financial_analysis(
         "Own-account transfers must be classified as TRANSFER in every imported account to avoid overstating income and spending."
     )
     return {
-        "schema_version": "2.0",
+        "schema_version": "3.0",
         "currency": "INR",
         "analysis_source": source,
         "period": {
@@ -251,6 +174,8 @@ def financial_analysis(
         "profile": serialize(profile) if profile else None,
         "liabilities": [serialize(loan) for loan in liabilities],
         "bank_accounts": banks,
+        "accounts": [{"id": account.id, "name": account.name, "balance": account.balance, "currency": account.currency}
+                     for account in wallet_accounts if not account.is_system],
         "metrics": {
             "declared_monthly_income": declared_income,
             "observed_monthly_income": average["income"],
@@ -300,6 +225,7 @@ def financial_analysis(
             selected, key=lambda row: (row["date"], row["id"]), reverse=True
         )[:10],
         "transactions": selected,
+        "account_statements": list(account_ledgers.values()),
         "data_quality": {
             "flags": flags,
             "profile_present": profile is not None,
@@ -313,7 +239,7 @@ def financial_analysis(
             "expense_to_income_percent": "Non-investment outflows / observed inflows * 100; excludes TRANSFER.",
             "savings_rate_percent": "(Observed income - expenses) / observed income * 100; before investments.",
             "debt_service_to_income_percent": "Self-reported monthly debt payments / declared monthly income * 100.",
-            "estimated_net_worth": "Latest available bank cash snapshots (or INR wallet balances when no statements), plus declared assets, minus declared debt. These are current snapshots, not historical valuations.",
+            "estimated_net_worth": "Current spendable INR account balances, plus declared assets, minus declared debt. The balance is current even when a past analysis window is selected.",
             "cash_runway_months": "Non-negative observed cash / average monthly expenses; expenses include EMIs.",
             "budget_variance": "Declared monthly expense budget minus observed monthly expenses; includes EMIs, excludes investments.",
         },

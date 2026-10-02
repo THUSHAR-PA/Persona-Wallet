@@ -40,9 +40,9 @@ export default function FinancialOverview({ twin }) {
           hint={`Debt service / declared income: ${percent(m.debt_service_to_income_percent)}`}
         />
         <Metric
-          title="Observed cash"
+          title="Available bank balance"
           value={money(m.cash_balance)}
-          hint="Latest dated bank snapshots, or INR wallet cash without statements."
+          hint="Current INR account balances, including transfers after statement imports."
         />
         <Metric
           title="Estimated net worth"

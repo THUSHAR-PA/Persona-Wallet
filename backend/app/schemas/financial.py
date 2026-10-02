@@ -52,3 +52,4 @@ class BankAccountInput(BaseModel):
     bank_name: str = Field(min_length=1, max_length=120)
     last_four: str = Field(default="", pattern=r"^(\d{4})?$")
     currency: Literal["INR"] = "INR"
+    wallet_account_id: int | None = Field(default=None, gt=0)

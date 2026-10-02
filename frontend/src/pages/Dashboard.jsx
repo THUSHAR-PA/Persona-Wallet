@@ -42,7 +42,7 @@ function Dashboard() {
       <div className="mb-8 flex flex-wrap items-end justify-between gap-5">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.2em] text-blue-600">
-            Persona Wallet / Financial Twin
+            Persona Wallet / Your digital bank
           </p>
           <h1 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">
             Your financial command center
@@ -103,36 +103,23 @@ function Dashboard() {
             <section className={`${panelClass} mt-6`}>
               <div className="flex flex-wrap justify-between gap-3">
                 <div>
-                  <h2 className="text-lg font-semibold">Wallet ledger</h2>
+                  <h2 className="text-lg font-semibold">Your bank accounts</h2>
                   <p className="mt-1 text-sm text-slate-500">
-                    {summary.accounts.length} wallet accounts ·{" "}
-                    {summary.metrics.transaction_count} wallet transfers. Bank
-                    imports are recorded separately.
+                    {summary.accounts.length} accounts. Imported history and new transfers update the same balances.
                   </p>
                 </div>
                 <Link to="/accounts" className={secondaryClass}>
-                  Manage wallet accounts
+                  Manage bank accounts
                 </Link>
               </div>
               <div className="mt-4 flex flex-wrap gap-8 text-sm">
                 <p>
-                  Wallet cash{" "}
+                  Available balance{" "}
                   <strong className="ml-2">
                     {money(summary.metrics.total_balance)}
                   </strong>
                 </p>
-                <p>
-                  Wallet money in{" "}
-                  <strong className="ml-2">
-                    {money(summary.metrics.total_inflow)}
-                  </strong>
-                </p>
-                <p>
-                  Wallet money out{" "}
-                  <strong className="ml-2">
-                    {money(summary.metrics.total_outflow)}
-                  </strong>
-                </p>
+                <Link to="/statements" className="font-semibold text-blue-600">View or download account statements →</Link>
               </div>
             </section>
           </>

@@ -1,9 +1,11 @@
 import json
+import csv
+import io
 from datetime import date
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from starlette.concurrency import run_in_threadpool
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -19,6 +21,7 @@ from app.models.financial import (
 )
 from app.models.user import User
 from app.schemas.financial import BankAccountInput, LiabilityInput, ProfileInput
+from app.services.bank_ledger import attach_account, linked_account, account_ledger, import_effect
 from app.services.statements import (
     CATEGORIES,
     MAX_FILE_BYTES,
@@ -150,6 +153,7 @@ def get_bank_accounts(
             {
                 **record_dict(account),
                 "closing_balance": latest.closing_balance if latest else None,
+                "balance": linked_account(db, account).balance,
                 "balance_as_of": latest.period_end if latest else None,
                 "imports": [record_dict(item) for item in imports],
             }
@@ -163,7 +167,9 @@ def add_bank_account(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    row = BankAccount(user_id=user.id, **data.model_dump())
+    values = data.model_dump(exclude={"wallet_account_id"})
+    row = BankAccount(user_id=user.id, **values)
+    attach_account(db, row, data.wallet_account_id)
     db.add(row)
     commit(db)
     db.refresh(row)
@@ -177,6 +183,8 @@ def delete_bank_account(
     user: User = Depends(get_current_user),
 ):
     account = owned(db, BankAccount, record_id, user)
+    if db.query(StatementImport).filter_by(account_id=account.id).first():
+        raise HTTPException(409, "An account with posted bank history cannot be removed. Its history supports the current balance.")
     db.query(StatementEntry).filter_by(account_id=account.id).delete()
     db.query(StatementImport).filter_by(account_id=account.id).delete()
     db.delete(account)
@@ -236,7 +244,7 @@ def preview(db, account, parsed):
         duplicate = row["fingerprint"] in seen
         seen.add(row["fingerprint"])
         rows.append({**row, "row_index": i, "duplicate": duplicate})
-    return {
+    reviewed = {
         **{key: value for key, value in parsed.items() if key != "rows"},
         "rows": rows,
         "new_rows": sum(not row["duplicate"] for row in rows),
@@ -247,6 +255,14 @@ def preview(db, account, parsed):
             "Identical rows without a unique reference are treated as duplicates. Supply bank references to distinguish them.",
         ],
     }
+    wallet, projected = import_effect(db, account, reviewed, parsed)
+    reviewed["new_rows"] = sum(not row["duplicate"] for row in reviewed["rows"])
+    reviewed["duplicate_rows"] = len(reviewed["rows"]) - reviewed["new_rows"]
+    reviewed["wallet_account_id"] = wallet.id
+    reviewed["current_account_balance"] = wallet.balance
+    reviewed["projected_account_balance"] = projected
+    reviewed["warnings"].insert(0, "Importing updates this account's spendable balance and history. Later transfers are retained.")
+    return reviewed
 
 
 @router.post("/statements/preview")
@@ -303,6 +319,7 @@ def persist_statement(db, account, parsed, filename, overrides=None):
         }
         data["category"] = (overrides or {}).get(str(index), data["category"])
         db.add(StatementEntry(account_id=account.id, import_id=batch.id, **data))
+    linked_account(db, account, lock=True).balance = reviewed["projected_account_balance"]
     return batch
 
 
@@ -339,7 +356,35 @@ async def import_statement(
             409, "Statement was imported concurrently. Refresh and retry."
         ) from exc
     db.refresh(batch)
-    return record_dict(batch)
+    return {**record_dict(batch), "wallet_account_id": account.wallet_account_id,
+            "account_balance": linked_account(db, account).balance}
+
+
+@router.get("/bank-accounts/{record_id}/statement")
+def bank_statement(
+    record_id: int, format: str = "json",
+    db: Session = Depends(get_db), user: User = Depends(get_current_user),
+):
+    bank = owned(db, BankAccount, record_id, user)
+    ledger = account_ledger(db, linked_account(db, bank), bank)
+    if format == "json":
+        return ledger
+    if format != "csv":
+        raise HTTPException(422, "Choose json or csv.")
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["Date", "Description", "Debit", "Credit", "Balance", "Reference", "Category"])
+    for row in ledger["transactions"]:
+        # Prefix formula-like text to keep spreadsheet downloads inert.
+        description = row["description"]
+        if description.startswith(("=", "+", "-", "@")):
+            description = "'" + description
+        writer.writerow([row["date"], description,
+            row["amount"] if row["direction"] == "OUTFLOW" else "",
+            row["amount"] if row["direction"] == "INFLOW" else "",
+            row["balance"], row["reference"], row["category"]])
+    return Response(buffer.getvalue(), media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="account-{bank.wallet_account_id}-statement.csv"'})
 
 
 @router.get("/sample-statement")
@@ -411,6 +456,7 @@ def load_demo(db: Session = Depends(get_db), user: User = Depends(get_current_us
         currency="INR",
     )
     db.add(account)
+    attach_account(db, account)
     db.flush()
     parsed = parse_statement(SAMPLE_PATH.read_bytes(), SAMPLE_PATH.name)
     batch = persist_statement(db, account, parsed, SAMPLE_PATH.name)

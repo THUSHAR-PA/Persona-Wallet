@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import api from "../api";
+import { Link } from "react-router-dom";
 
 function Accounts() {
   const [accounts, setAccounts] = useState([]);
@@ -14,6 +15,7 @@ function Accounts() {
 
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [statement, setStatement] = useState(null);
 
   const fetchAccounts = async () => {
     try {
@@ -238,11 +240,23 @@ function Accounts() {
               <p className="text-sm text-gray-500 mt-2">
                 {account.currency}
               </p>
+              <button className="mt-4 text-sm font-semibold text-blue-600" onClick={async () => {
+                try { const { data } = await api.get(`/accounts/${account.id}/statement`); setStatement(data); }
+                catch { setError("Could not load account statement."); }
+              }}>View account statement</button>
             </div>
           ))}
 
         </div>
       )}
+      <Link to="/statements" className="mt-6 inline-block font-semibold text-blue-600">Import or download bank statements →</Link>
+      {statement && <section className="mt-6 rounded-xl bg-white p-6 shadow">
+        <div className="flex justify-between"><h2 className="text-xl font-bold">{statement.account_name} statement</h2><button onClick={() => setStatement(null)}>Close</button></div>
+        <p className="my-3 text-sm">Current balance: {statement.closing_balance} {statement.currency}</p>
+        <div className="max-h-96 overflow-auto"><table className="w-full text-left text-sm"><thead><tr>{["Date", "Description", "Debit / credit", "Balance"].map((heading) => <th className="p-2" key={heading}>{heading}</th>)}</tr></thead>
+          <tbody>{statement.transactions.map((row) => <tr className="border-t" key={`${row.source}-${row.id}`}><td className="p-2">{row.date}</td><td className="p-2">{row.description}</td><td className="p-2">{row.direction === "INFLOW" ? "+" : "−"}{row.amount}</td><td className="p-2">{row.balance}</td></tr>)}</tbody>
+        </table></div>
+      </section>}
 
     </div>
   );

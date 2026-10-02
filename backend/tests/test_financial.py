@@ -125,7 +125,7 @@ def test_sample_csv_and_pdf_are_equivalent():
     assert csv_data["closing_balance"] == Decimal("252374")
 
 
-def test_preview_then_import_no_wallet_mutation_and_duplicate_protection(context):
+def test_preview_then_import_funds_linked_account_and_duplicate_protection(context):
     client, factory, headers = context
     account = bank(client, headers[0])
     with factory() as db:
@@ -150,7 +150,8 @@ def test_preview_then_import_no_wallet_mutation_and_duplicate_protection(context
     assert response.status_code == 201, response.text
     assert response.json()["imported_rows"] == 234
     with factory() as db:
-        assert db.query(Account).one().balance == 5000
+        assert db.query(Account).filter_by(name="Spendable wallet").one().balance == 5000
+        assert db.query(Account).filter_by(name="Salary account").one().balance == 252374
         assert db.query(Transaction).count() == 0
         assert (
             db.query(StatementEntry).order_by(StatementEntry.id).all()[1].category
@@ -272,7 +273,7 @@ def test_demo_metrics_are_independently_reconciled(context):
         twin["period"]["start"] == "2026-04-01"
         and twin["period"]["end"] == "2026-09-30"
     )
-    assert twin["analysis_source"] == "BANK_STATEMENTS"
+    assert twin["analysis_source"] == "UNIFIED_BANK_LEDGER"
     assert len(twin["transactions"]) == 234
     assert client.post("/financial/demo", headers=headers[0]).status_code == 409
     assert (
@@ -305,13 +306,12 @@ def test_zero_income_empty_months_and_missing_balances(context):
     assert twin["metrics"]["cash_runway_months"] is None
     account = bank(client, headers[0])
     data = b"Date,Description,Debit,Credit\n2026-09-02,Purchase,100,\n"
-    assert upload(client, headers[0], account, "import", data).status_code == 201
+    assert upload(client, headers[0], account, "import", data).status_code == 422
     twin = client.get("/integration/financial-summary", headers=headers[0]).json()[
         "financial_twin"
     ]
-    assert len(twin["data_quality"]["missing_months"]) == 5
-    assert twin["bank_accounts"][0]["balance"] is None
-    assert any("incomplete" in flag for flag in twin["data_quality"]["flags"])
+    assert len(twin["data_quality"]["missing_months"]) == 6
+    assert twin["bank_accounts"][0]["balance"] == 0
 
 
 def test_wallet_transfers_still_work_and_internal_failed_excluded(context):
@@ -381,7 +381,7 @@ def test_wallet_transfers_still_work_and_internal_failed_excluded(context):
     ).json()
     assert summary["metrics"]["total_outflow"] == 100
     assert summary["financial_twin"]["metrics"]["monthly_expenses"] == 100
-    assert len(summary["financial_twin"]["transactions"]) == 1
+    assert len(summary["financial_twin"]["transactions"]) == 3
 
 
 @pytest.mark.parametrize(
@@ -444,10 +444,10 @@ def test_profile_validation_liability_edit_and_delete_bank_data(context):
         client.delete(
             f"/financial/bank-accounts/{account}", headers=headers[0]
         ).status_code
-        == 204
+        == 409
     )
     with factory() as db:
-        assert db.query(StatementEntry).count() == 0
+        assert db.query(StatementEntry).count() == 234
 
 
 def test_signup_login_and_sample_download(context):
@@ -486,10 +486,10 @@ def test_reference_conflict_and_cosmetic_description_deduplication(context):
     client, _, headers = context
     account = bank(client, headers[0])
     original = (
-        b"Date,Description,Debit,Credit,Reference\n2026-09-01,Purchase,100,,REF-1\n"
+        b"Date,Description,Debit,Credit,Balance,Reference\n2026-09-01,Purchase,100,,900,REF-1\n"
     )
-    changed = b"Date,Description,Debit,Credit,Reference\n2026-09-01,Purchase revised,101,,REF-1\n"
-    cosmetic = b"Date,Description,Debit,Credit,Reference\n2026-09-01,Purchase revised,100,,REF-1\n"
+    changed = b"Date,Description,Debit,Credit,Balance,Reference\n2026-09-01,Purchase revised,101,,899,REF-1\n"
+    cosmetic = b"Date,Description,Debit,Credit,Balance,Reference\n2026-09-01,Purchase revised,100,,900,REF-1\n"
     assert upload(client, headers[0], account, "import", original).status_code == 201
     assert upload(client, headers[0], account, "import", changed).status_code == 409
     assert upload(client, headers[0], account, "import", cosmetic).status_code == 409

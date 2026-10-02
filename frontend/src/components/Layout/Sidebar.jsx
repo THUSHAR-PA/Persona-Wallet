@@ -18,7 +18,7 @@ function Sidebar() {
     { name: "Accounts", path: "/accounts", icon: <Wallet size={20} /> },
     { name: "Transfer", path: "/transfer", icon: <ArrowLeftRight size={20} /> },
     { name: "History", path: "/history", icon: <History size={20} /> },
-    { name: "Financial Twin", path: "/profile", icon: <Brain size={20} /> },
+    { name: "Financial Profile", path: "/profile", icon: <Brain size={20} /> },
     {
       name: "Bank Statements",
       path: "/statements",

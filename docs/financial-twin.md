@@ -7,31 +7,30 @@ Each loan or mortgage stores lender, original amount, outstanding principal,
 annual rate, monthly payment, remaining months and a balance observation date.
 Users can add, edit and remove liabilities.
 
-The `/statements` page stores external bank observations separately from wallet
-accounts and transfers. An import never changes wallet balances or creates a
-spendable wallet transaction. Full account numbers and original file bytes are
-not saved; descriptions and references from accepted transactions are retained.
+Persona Wallet is the user’s simulated bank. The `/statements` page attaches imported
+history to a spendable account. Choose an existing owned INR account or create one.
+Importing establishes its balance from reconciled history, while retaining subsequent
+Persona Wallet transfers. Imports and live transfers compose one account ledger.
+Full account numbers and original upload bytes are not retained.
 
 ## Statement workflow
 
-1. Create a bank account label (INR only), bank name and optional last four digits.
+1. Choose an existing INR account or create one with a bank name and optional last four digits.
 2. Download the sample or choose your bank's CSV/text-table PDF.
 3. Preview the file. No data is persisted at this stage.
 4. Review suggested categories on every preview page. Classify own-account
    transfers as `TRANSFER` on both accounts; keep investment contributions as
    `INVESTMENT`. EMI payments remain expenses.
-5. Confirm the import. It saves the parsed transactions and import provenance.
+5. Confirm the projected account balance. The import posts history and updates spendable funds atomically.
 6. Open the dashboard. Choose a 1, 3, 6, 12 or 24 month window and optionally an
-   end date. The default ends on the latest recorded bank transaction (or wallet
-   transaction if no bank statements exist).
+   end date. The default ends on the latest transaction in the combined bank ledger.
 
 CSV headers: `Date,Description,Debit,Credit,Balance,Reference,Category`.
-Date, Description, Debit and Credit are required. Supported common aliases include
+Date, Description, Debit, Credit and Balance are required for bank imports. Supported common aliases include
 Transaction Date, Narration, Withdrawal and Deposit. Use UTF-8 and dates in
 `YYYY-MM-DD` or day-first `DD/MM/YYYY`. Each row needs exactly one positive debit
-or credit, and at most two decimal places. Running balance, reference and category
-are optional. When balances are provided, every row must have one and the sequence
-must reconcile. Rows must be in chronological or reverse chronological order.
+or credit, and at most two decimal places. Reference and category are optional. Every imported row needs a running balance and the sequence
+must reconcile with existing history. Rows must be in chronological or reverse chronological order.
 Balances are inferred from the reconciled first and last transactions; the
 observation period is the first through last transaction date, not an inferred
 statement header period.
@@ -52,26 +51,44 @@ reports this. The same exact file cannot be added to a second bank account owned
 by the user. Distinct files containing the same activity in different bank account
 labels cannot always be recognized; label accounts consistently.
 
-Removing a statement account deletes its imported history and balance snapshots.
-It does not delete wallet accounts or loans. Demo loading requires no existing
-profile, liabilities or statement accounts, so it cannot overwrite real financial
-records. The loader creates fictional data only for the signed-in user; it creates
-no public demo users or shared passwords.
+Accounts with posted imported history cannot be removed: that history supports the
+spendable balance. An empty statement setup can be removed without deleting its
+underlying account. Demo loading requires an empty financial profile, liabilities
+and statement setup, and creates a funded bank account for the signed-in user.
+It does not overwrite existing accounts or create public users/shared passwords.
+
+### Statement updates and overlap
+
+`/accounts/{id}/statement` returns the complete combined history for an owned account.
+`/financial/bank-accounts/{id}/statement?format=csv` downloads the latest statement,
+including imports and subsequent transfers with running balances. Live payments
+retain `WALLET-{transaction_id}` references, allowing exported CSVs to be recognized
+on re-upload. An export containing only existing rows is rejected with no changes.
+
+Older backfills must reconcile with existing imported balances and do not reset
+newer transfers. A new statement covering posted live payments must contain their
+matching WALLET references; ambiguous overlap is rejected instead of posting the
+same payment twice. Upload continuous history; unexplained balance gaps are rejected.
+The first import replaces a manually entered initial balance with the statement’s
+reconciled opening history and closing balance, plus later live transfers. Preview
+shows the resulting balance before confirmation. Import/transfer operations lock
+account rows on PostgreSQL to prevent lost balance updates.
 
 ## Metrics and data provenance
 
-The legacy top-level wallet summary is retained. Its monetary totals are INR only.
-The new `financial_twin` object is the financial data contract (schema version 2.0).
-When bank records exist, analytics use those records, not a sum of bank records
-and wallet transfers. Without bank records, successful external INR wallet
-transactions are the fallback; internal wallet transfers and failed/pending
-payments are excluded. Imported `TRANSFER` rows are excluded from income and
-expense calculations. All selected rows remain in the export for auditing.
+`financial_twin` is the authoritative financial contract (schema version 3.0).
+It uses imported history and successful live transfers together. Own-account
+transfers appear on both accounts’ statements but are excluded from income and
+expense calculations. A transfer to another user is an expense even if its original
+category is TRANSFER. Failed/pending transfers are excluded. `account_statements`
+contains all recorded account history, while `transactions` uses the selected
+analysis window. Legacy wallet-only `metrics`/`transactions` remain for compatibility;
+consumers should use `financial_twin` to include imported activity.
 
 Monthly averages divide by the full requested window, including months with no
 recorded transactions. Missing and partial months are explicitly flagged. Missing
-denominators return `null`, not a manufactured zero-percent ratio. Cash and net
-worth can be incomplete when a closing bank balance is unavailable.
+denominators return `null`, not a manufactured zero-percent ratio. Current cash
+is the sum of spendable INR accounts; a past analysis window does not rewind it.
 
 | Metric | Definition |
 | --- | --- |
@@ -82,8 +99,8 @@ worth can be incomplete when a closing bank balance is unavailable.
 | Savings rate | (Income − expenses) / income × 100; before investments |
 | Net cash flow | Income − expenses − investments; excludes own-account transfers |
 | Debt service ratio | Declared monthly loan payments / declared monthly income × 100 |
-| Cash | Latest available dated closing balances, or INR wallet cash without statements |
-| Net worth | Observed cash + declared asset values − declared outstanding debt |
+| Cash | Current spendable INR account balances, including live transfers |
+| Net worth | Current bank cash + declared asset values − declared outstanding debt |
 | Cash runway | Non-negative cash / average expenses |
 | Budget remaining | Declared expense budget − observed monthly expenses |
 
@@ -91,10 +108,10 @@ Loan principal and amortization cannot be reconstructed reliably from EMI amount
 Statements do not automatically reduce principal or determine rate/tenure.
 Self-reported assets, profile income and debt are current snapshots, not historical
 valuations when a past observation window is selected. Each loan retains its own
-balance date; bank balances have `balance_as_of`. Loan and category provenance,
-missing data flags and metric definitions travel with the export. This change
-provides richer input to PersonaTwin; automatic synchronization to PersonaTwin
-is not implemented here.
+balance date; bank accounts have current spendable balances. Loan and category provenance,
+missing data flags and metric definitions travel with the export. PersonaTwin’s bank integration reads and retains this complete snapshot and
+refreshes while its wallet connection is active. Its session token is not stored
+in the snapshot. See PersonaTwin’s `docs/bank-ledger-sync.md`.
 
 ## API (JWT required)
 
@@ -103,11 +120,13 @@ is not implemented here.
 | GET / PUT | `/financial/profile` | Read / replace profile |
 | GET / POST | `/financial/liabilities` | List / add loans |
 | PUT / DELETE | `/financial/liabilities/{id}` | Edit / remove own liability |
-| GET / POST | `/financial/bank-accounts` | List / add external bank accounts |
-| DELETE | `/financial/bank-accounts/{id}` | Remove account and its imports |
+| GET / POST | `/financial/bank-accounts` | List / create or link spendable INR accounts |
+| DELETE | `/financial/bank-accounts/{id}` | Remove an empty statement setup; posted history is retained |
 | POST | `/financial/statements/preview` | Multipart `account_id`, `file`; read-only preview |
 | POST | `/financial/statements/import` | Same fields plus optional `categories` JSON object keyed by zero-based row index |
 | GET | `/financial/sample-statement?format=csv` | Download fixture; `format=pdf` also supported |
+| GET | `/accounts/{id}/statement` | Full owned account ledger |
+| GET | `/financial/bank-accounts/{id}/statement?format=csv` | Download combined statement |
 | POST | `/financial/demo` | Explicitly load fixture and fictional financial profile |
 | GET | `/integration/financial-summary?months=6&end_date=2026-09-30` | Wallet summary + complete financial twin snapshot |
 
@@ -162,12 +181,14 @@ npm run lint
 ```
 
 `verify_migrations.py` uses an isolated temporary SQLite database; it does not
-touch Neon. Tests cover CSV/PDF equivalence, imports and overlap deduplication,
+touch Neon. The bank-ledger migration creates funded accounts for existing demo
+and statement accounts from their latest known closing balance, leaving prior
+wallet balances/transfers intact. Existing imports without a closing balance start
+at zero and require reconciled history before funding. Tests cover CSV/PDF equivalence, imports and overlap deduplication,
 atomic failures, cross-user access, profile/debt mutations, calculations and
 existing wallet transfers. PostgreSQL migration SQL also compiles offline; a
 live Neon migration has not been performed.
 
-The local browser check also exercised signup/login, demo loading, analysis-window
-filtering, duplicate preview, PDF upload with category review and confirmation,
-liability editing, logout and a 390px mobile layout. It used fictional local users
-and a temporary database, not the deployed services.
+Bank-ledger tests verify funding, transfers on both accounts, updated statements,
+CSV round-trip deduplication, older backfills, conflicting imports, account ownership,
+and populated migration preservation. No production database was touched.

@@ -1,4 +1,4 @@
-"""Bank observations are deliberately separate from the spendable wallet ledger."""
+"""Financial details and imported history attached to spendable bank accounts."""
 
 from sqlalchemy import (
     Column,
@@ -51,6 +51,7 @@ class BankAccount(Base):
     __tablename__ = "statement_accounts"
     __table_args__ = (
         UniqueConstraint("user_id", "name", name="uq_statement_account_name"),
+        UniqueConstraint("wallet_account_id", name="uq_statement_wallet_account"),
     )
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
@@ -58,6 +59,7 @@ class BankAccount(Base):
     bank_name = Column(String(120), nullable=False)
     last_four = Column(String(4), nullable=False, default="")
     currency = Column(String(3), nullable=False, default="INR")
+    wallet_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
 
 
 class StatementImport(Base):
